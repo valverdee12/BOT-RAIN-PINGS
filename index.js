@@ -1,6 +1,13 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { iniciarDetector } = require('./src/detector');
+const express = require('express');
+
+// --- SERVIDOR WEB PARA RENDER (TRUCO PORT BINDING) ---
+const app = express();
+const port = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot is Alive!'));
+app.listen(port, () => console.log(`🌍 Puerto ${port} abierto para Render.`));
 
 // --- CONFIGURACIÓN ---
 const TOKEN = process.env.DISCORD_TOKEN?.trim();
@@ -11,7 +18,7 @@ if (!TOKEN || !CHANNEL_ID) {
     process.exit(1);
 }
 
-// Cliente de Discord con ajustes de estabilidad para servidores (Render/Railway)
+// Cliente de Discord
 const client = new Client({
     intents: [GatewayIntentBits.Guilds],
     rest: { 
@@ -22,7 +29,7 @@ const client = new Client({
 
 let detectorActivo = false;
 let ultimoAvisoTime = 0;
-const COOLDOWN_MINUTOS = 25; // Tiempo de espera entre mensajes @everyone
+const COOLDOWN_MINUTOS = 25; 
 
 client.once('ready', async () => {
     console.log(`✅ BOT ONLINE: Conectado como ${client.user.tag}`);
@@ -34,12 +41,10 @@ client.once('ready', async () => {
         console.log("📡 Iniciando el detector de eventos...");
         
         iniciarDetector(async (evento) => {
-            // 1. Validar que el evento tenga datos reales
             if (!evento || !evento.amount || isNaN(evento.amount) || evento.amount <= 0) {
-                return; // Ignorar si es basura o cantidad 0
+                return;
             }
 
-            // 2. Control de Cooldown (Anti-spam)
             const ahora = Date.now();
             const tiempoEsperaMs = COOLDOWN_MINUTOS * 60 * 1000;
             
@@ -48,7 +53,6 @@ client.once('ready', async () => {
                 return;
             }
 
-            // 3. Envío del mensaje a Discord
             try {
                 const canal = await client.channels.fetch(CHANNEL_ID);
                 if (!canal) {
@@ -78,24 +82,14 @@ client.once('ready', async () => {
     }
 });
 
-// --- GESTIÓN DE ERRORES Y REINICIO ---
-
-client.on('error', (error) => {
-    console.error('❌ Error de conexión en Discord:', error.message);
-});
-
-// Si algo falla fuera de un try/catch, evitamos que el bot muera silenciosamente
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('❌ Rechazo no manejado en:', promise, 'razón:', reason);
-});
-
+// Gestión de errores
+client.on('error', (error) => console.error('❌ Error de conexión en Discord:', error.message));
+process.on('unhandledRejection', (reason, promise) => console.error('❌ Rechazo no manejado:', reason));
 process.on('uncaughtException', (err) => {
     console.error('❌ Excepción no capturada:', err.message);
-    // En servidores como Render, es mejor salir con error para que el sistema lo reinicie
     process.exit(1);
 });
 
-// Login
 client.login(TOKEN).catch(e => {
     console.error('❌ Fallo el login de Discord:', e.message);
     process.exit(1);
