@@ -2,67 +2,101 @@ require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { iniciarDetector } = require('./src/detector');
 
-// Token y Canal
-const TOKEN = process.env.DISCORD_TOKEN ? process.env.DISCORD_TOKEN.trim() : "";
+// --- CONFIGURACIÓN ---
+const TOKEN = process.env.DISCORD_TOKEN?.trim();
 const CHANNEL_ID = process.env.DISCORD_CHANNEL_ID;
 
-// Configuración del cliente (Timeout aumentado para Railway)
+if (!TOKEN || !CHANNEL_ID) {
+    console.error('❌ ERROR: Faltan las variables DISCORD_TOKEN o DISCORD_CHANNEL_ID en el .env');
+    process.exit(1);
+}
+
+// Cliente de Discord con ajustes de estabilidad para servidores (Render/Railway)
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds],
-  rest: { timeout: 30000 }
+    intents: [GatewayIntentBits.Guilds],
+    rest: { 
+        timeout: 60000, 
+        retries: 5 
+    }
 });
 
-// Variables globales del Bot
 let detectorActivo = false;
 let ultimoAvisoTime = 0;
-const COOLDOWN_MINUTOS = 25; // 25 min de espera entre avisos
+const COOLDOWN_MINUTOS = 25; // Tiempo de espera entre mensajes @everyone
 
 client.once('ready', async () => {
-  console.log(`🤖 CONECTADO como ${client.user.tag}`);
+    console.log(`✅ BOT ONLINE: Conectado como ${client.user.tag}`);
 
-  if (detectorActivo) return;
-  detectorActivo = true;
-
-  // Iniciamos el detector (el mensaje de Puppeteer saldrá desde detector.js)
-  iniciarDetector(async (evento) => {
-    
-    // --- ZONA DE FILTROS SILENCIOSOS ---
-    
-    // 1. Si no hay dinero o es 0 (basura del chat), lo ignoramos sin decir nada.
-    if (!evento.amount || isNaN(evento.amount) || evento.amount <= 0) return;
-
-    // 2. Si hace menos de 25 min del último aviso, lo ignoramos sin decir nada.
-    const ahora = Date.now();
-    const tiempoEsperaMs = COOLDOWN_MINUTOS * 60 * 1000;
-    if ((ahora - ultimoAvisoTime) < tiempoEsperaMs) return;
-
-    // --- ENVIAR ALERTA REAL ---
+    if (detectorActivo) return;
+    detectorActivo = true;
 
     try {
-      const canal = await client.channels.fetch(CHANNEL_ID);
-      if (!canal) return console.error('⚠️ Error: Canal Discord no encontrado');
+        console.log("📡 Iniciando el detector de eventos...");
+        
+        iniciarDetector(async (evento) => {
+            // 1. Validar que el evento tenga datos reales
+            if (!evento || !evento.amount || isNaN(evento.amount) || evento.amount <= 0) {
+                return; // Ignorar si es basura o cantidad 0
+            }
 
-      // Actualizamos el contador de tiempo
-      ultimoAvisoTime = ahora; 
+            // 2. Control de Cooldown (Anti-spam)
+            const ahora = Date.now();
+            const tiempoEsperaMs = COOLDOWN_MINUTOS * 60 * 1000;
+            
+            if ((ahora - ultimoAvisoTime) < tiempoEsperaMs) {
+                console.log(`⏳ Evento detectado (${evento.amount} SCRAP), pero en cooldown.`);
+                return;
+            }
 
-      const mensaje = [
-        `@everyone RAIN ON BANDIT CAMP JOIN NOW!`,
-        `💰 **${evento.amount.toFixed(2)} SCRAP!**`,
-        `🔗 ${evento.url || 'https://bandit.camp'}`
-      ].filter(Boolean).join('\n');
+            // 3. Envío del mensaje a Discord
+            try {
+                const canal = await client.channels.fetch(CHANNEL_ID);
+                if (!canal) {
+                    console.error('⚠️ Error: No se pudo encontrar el canal de Discord.');
+                    return;
+                }
 
-      await canal.send(mensaje);
-      
-      // Único log que verás cuando funcione
-      console.log(`✅ Alerta enviada: ${evento.amount} SCRAP. (Silencio activado: ${COOLDOWN_MINUTOS} min)`);
-      
+                ultimoAvisoTime = ahora; 
+
+                const mensaje = [
+                    `⚠️ **RAIN ON BANDIT CAMP!** @everyone`,
+                    `💰 Cantidad: **${evento.amount.toFixed(2)} SCRAP**`,
+                    `🔗 [IR AL SITIO](${evento.url || 'https://bandit.camp'})`,
+                    `⏰ Próxima alerta disponible en: ${COOLDOWN_MINUTOS} min.`
+                ].join('\n');
+
+                await canal.send(mensaje);
+                console.log(`🚀 ALERTA ENVIADA: ${evento.amount} SCRAP detectados.`);
+                
+            } catch (err) {
+                console.error('❌ Error al enviar el mensaje al canal:', err.message);
+            }
+        });
+
     } catch (err) {
-      console.error('❌ Error enviando mensaje:', err.message);
+        console.error('❌ Error crítico al arrancar el detector:', err.message);
     }
-  });
 });
 
-// Gestión de errores básica para que no se apague
-client.on('error', (error) => console.error('❌ Error Discord:', error));
+// --- GESTIÓN DE ERRORES Y REINICIO ---
 
-client.login(TOKEN).catch(e => console.error('❌ Error Login:', e));
+client.on('error', (error) => {
+    console.error('❌ Error de conexión en Discord:', error.message);
+});
+
+// Si algo falla fuera de un try/catch, evitamos que el bot muera silenciosamente
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('❌ Rechazo no manejado en:', promise, 'razón:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+    console.error('❌ Excepción no capturada:', err.message);
+    // En servidores como Render, es mejor salir con error para que el sistema lo reinicie
+    process.exit(1);
+});
+
+// Login
+client.login(TOKEN).catch(e => {
+    console.error('❌ Fallo el login de Discord:', e.message);
+    process.exit(1);
+});
