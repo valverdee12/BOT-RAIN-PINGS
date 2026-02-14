@@ -1,13 +1,6 @@
 require('dotenv').config();
 const { Client, GatewayIntentBits } = require('discord.js');
 const { iniciarDetector } = require('./src/detector');
-const express = require('express');
-
-// --- SERVIDOR WEB PARA RENDER (TRUCO PORT BINDING) ---
-const app = express();
-const port = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot is Alive!'));
-app.listen(port, () => console.log(`🌍 Puerto ${port} abierto para Render.`));
 
 // --- CONFIGURACIÓN ---
 const TOKEN = process.env.DISCORD_TOKEN?.trim();
@@ -18,7 +11,7 @@ if (!TOKEN || !CHANNEL_ID) {
     process.exit(1);
 }
 
-// Cliente de Discord
+// Cliente de Discord optimizado
 const client = new Client({
     intents: [GatewayIntentBits.Guilds],
     rest: { 
@@ -38,7 +31,7 @@ client.once('ready', async () => {
     detectorActivo = true;
 
     try {
-        console.log("📡 Iniciando el detector de eventos...");
+        console.log("📡 Iniciando el detector de eventos en modo Background Worker...");
         
         iniciarDetector(async (evento) => {
             if (!evento || !evento.amount || isNaN(evento.amount) || evento.amount <= 0) {
@@ -82,9 +75,13 @@ client.once('ready', async () => {
     }
 });
 
-// Gestión de errores
+// Gestión de errores robusta
 client.on('error', (error) => console.error('❌ Error de conexión en Discord:', error.message));
-process.on('unhandledRejection', (reason, promise) => console.error('❌ Rechazo no manejado:', reason));
+
+process.on('unhandledRejection', (reason) => {
+    console.error('❌ Rechazo no manejado:', reason);
+});
+
 process.on('uncaughtException', (err) => {
     console.error('❌ Excepción no capturada:', err.message);
     process.exit(1);
